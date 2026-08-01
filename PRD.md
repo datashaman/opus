@@ -3,24 +3,24 @@
 ## Design Brief
 
 **Status:** Concept / architecture brief  
-**Product type:** Headless composition engine with a read-only observability interface  
-**Primary integration:** Ableton Live through an Ableton MCP adapter
+**Product type:** Headless rule, constraint, and storage engine for musical composition, with a read-only observability interface  
+**Primary integration pattern:** any DAW reachable through its own existing MCP server (e.g. Ableton MCP, Logic Pro MCP), connected client-side alongside Opus MCP — Opus MCP is platform-agnostic and never builds or hosts a target-specific adapter
 
 ---
 
 ## Vision
 
-Opus MCP is a headless system for creating and evolving music at the level of ideas rather than individual notes. It gives AI agents a shared, structured model of a composition—its motifs, sections, harmony, performance intent, energy, and relationships—then translates accepted musical decisions into MIDI, automation, clips, scenes, and other operations that Ableton Live can render and play.
+Opus MCP is a headless system for creating and evolving music at the level of ideas rather than individual notes. It gives AI agents a shared, structured model of a composition—its motifs, sections, harmony, performance intent, energy, and relationships—then compiles accepted musical decisions into a render plan that agents apply in the target DAW via that DAW's own existing MCP server.
 
-The system is not another digital audio workstation. Ableton remains the environment for sound selection, recording, detailed editing, mixing, performance, and final production. Opus MCP becomes the source of truth for musical meaning: what an idea is, why it exists, where it returns, how it changes, and which constraints shape it.
+The system is not another digital audio workstation. The target DAW remains the environment for sound selection, recording, detailed editing, mixing, performance, and final production. Opus MCP becomes the source of truth for musical meaning: what an idea is, why it exists, where it returns, how it changes, and which constraints shape it.
 
-The long-term product is an IDE for musical ideas. A user can ask for a change such as “foreshadow the chorus in the second verse,” receive several explainable alternatives, audition them in Ableton, and accept, reject, merge, or branch the result without losing provenance.
+The long-term product is an IDE for musical ideas. A user can ask for a change such as “foreshadow the chorus in the second verse,” receive several explainable alternatives, audition them in their DAW, and accept, reject, merge, or branch the result without losing provenance.
 
 ## Core Principles
 
 1. **Musical meaning is the primary abstraction.** Agents work with motifs, phrases, sections, harmonic functions, tension, density, orchestration, and performance character—not raw MIDI events unless rendering requires them.
 
-2. **The composition graph is canonical.** Opus MCP owns the authoritative musical model. Ableton is a synchronized render and performance target, not the sole source of truth.
+2. **The composition graph is canonical.** Opus MCP owns the authoritative musical model. The target DAW is a synchronized render and performance target, not the sole source of truth.
 
 3. **Intent, performance, and render are separate layers.** A musical idea should survive changes in instrumentation, voicing, articulation, tempo, or production treatment.
 
@@ -30,9 +30,9 @@ The long-term product is an IDE for musical ideas. A user can ask for a change s
 
 6. **Humans retain editorial authority.** Agents propose and explain. Users audition and decide. No destructive or ambiguous synchronization happens silently.
 
-7. **The first UI is read-only.** It exists to make the system legible: state, relationships, decisions, alternatives, synchronization, and agent activity. Editing remains conversational, tool-driven, or inside Ableton.
+7. **The first UI is read-only.** It exists to make the system legible: state, relationships, decisions, alternatives, synchronization, and agent activity. Editing remains conversational, tool-driven, or inside the target DAW.
 
-8. **Round-trip ambiguity is explicit.** Manual Ableton changes are detected and classified rather than automatically overwriting semantic intent.
+8. **Round-trip ambiguity is explicit.** Manual DAW changes are detected and classified rather than automatically overwriting semantic intent.
 
 ## Architecture
 
@@ -44,19 +44,21 @@ Owns the canonical graph, stable entity identifiers, constraints, revisions, bra
 
 ### 2. Agent Runtime
 
-Coordinates specialist agents that inspect the graph and propose bounded changes. Agents operate against snapshots and return structured proposals rather than directly mutating Ableton or the canonical graph.
+Coordinates specialist agents that inspect the graph and propose bounded changes. Agents operate against snapshots and return structured proposals rather than directly mutating the target DAW or the canonical graph.
 
 ### 3. Render Planner
 
 Compiles semantic intent and performance instructions into a deterministic render plan. The plan can include notes, velocities, timing, articulations, controller data, automation, clip boundaries, track assignments, and scene structure.
 
-### 4. Ableton MCP Adapter
+### 4. Target DAW MCP (external, client-side)
 
-Translates render plans into Ableton operations, maintains stable mappings between graph entities and Ableton objects, reads relevant project state, and reports drift or conflicts back to the composition core.
+Each supported DAW (Ableton Live, Logic Pro, and others) is expected to already have its own MCP server that gives agents direct tool access to that DAW — tracks, clips, scenes, notes, automation, devices. Opus MCP does not build, host, or extend any of these; they run in the agent's client environment alongside the Opus MCP connection, one per target DAW the agent is working with.
+
+Opus MCP's role is limited to data: the Composition Core stores stable mappings between graph entities and DAW objects, target-specific render plans, render hashes, and drift or conflict records — keyed by target so the same composition can map to multiple DAWs. Agents read this data through Opus MCP resources, execute the corresponding operations themselves via that target's own MCP tools, and report outcomes back to Opus MCP so the mapping and drift state stay current.
 
 ### 5. Read-only UI
 
-Projects synchronized views of the graph, timeline, alternatives, provenance, and integration health. It is an observability surface over the same MCP resources used by agents and adapters.
+Projects synchronized views of the graph, timeline, alternatives, provenance, and integration health. It is an observability surface over the same MCP resources used by agents and their connected DAW MCP servers.
 
 ```text
 User request
@@ -69,9 +71,11 @@ Validation → Preview → Human decision
     ↓
 Canonical composition graph
     ↓
-Render planner → Ableton MCP adapter → Ableton Live
-    ↑                                      ↓
-    └──────── mappings, state, drift ──────┘
+Render planner → render plan (Opus MCP resource)
+    ↓
+Agent runtime (client-side) → target's own MCP server (external, client-side) → target DAW
+    ↑                                                                                ↓
+    └────────────────── mappings, render results, drift reported back ──────────────┘
 ```
 
 ## Graph Model
@@ -139,7 +143,7 @@ Illustrative resource paths:
 - `composition://project/{project_id}/proposals` — pending, accepted, rejected, and superseded alternatives
 - `composition://project/{project_id}/provenance/{entity_id}` — origin and change history for an entity
 - `composition://project/{project_id}/render-plan/{target}` — current target-specific render plan
-- `composition://project/{project_id}/sync/ableton` — mappings, last synchronization, drift, and conflicts
+- `composition://project/{project_id}/sync/{target}` — mappings, last synchronization, drift, and conflicts for a given target DAW
 - `composition://project/{project_id}/activity` — agent and system activity stream
 
 Resources should support filters for branch, revision, entity type, section, bar range, and level of detail so agents do not need to load the entire work.
@@ -158,9 +162,9 @@ Illustrative tool set:
 - `create_branch` — fork from a selected revision
 - `compare_branches` — return semantic and render-level differences
 - `merge_branch` — merge compatible graph diffs and surface unresolved conflicts
-- `render_to_ableton` — send a canonical revision or preview to the Ableton adapter
-- `inspect_ableton_drift` — compare mapped Ableton state with the last render state
-- `resolve_ableton_change` — absorb, preserve as override, regenerate, or fork a detected change
+- `render_to_target` — compile a canonical revision or preview into a render plan for the agent to execute via that target's own MCP server
+- `inspect_target_drift` — accept an agent-reported snapshot of mapped target-DAW state and compare it against the last render state
+- `resolve_target_change` — absorb, preserve as override, regenerate, or fork a detected change
 
 Every mutating call should require a base revision and idempotency key. Responses should include validation results, changed entities, affected constraints, provenance, warnings, and a new revision or proposal ID.
 
@@ -176,27 +180,27 @@ Every mutating call should require a base revision and idempotency key. Response
 
 Agents share the same graph vocabulary but receive role-specific permissions. In the initial product, they produce proposals only; the Conductor cannot bypass validation or human approval.
 
-## Ableton Integration
+## DAW Integration
 
-Ableton Live acts as the primary runtime for auditioning and production.
+The target DAW acts as the primary runtime for auditioning and production, reached through that DAW's own MCP server — existing, third-party tooling installed in the agent's client environment. Opus MCP does not connect to any DAW directly and does not build or maintain a target-specific adapter; the same composition graph can target multiple DAWs this way.
 
-The adapter maintains stable bidirectional mappings between graph entities and Ableton tracks, clips, scenes, notes, locators, devices, and automation. These mappings must survive re-renders where practical and record when an object has been replaced or orphaned.
+The Composition Core maintains stable bidirectional mappings between graph entities and DAW tracks, clips, scenes, notes, locators, devices, and automation as ordinary graph data, scoped per target. These mappings must survive re-renders where practical and record when an object has been replaced or orphaned. Agents are responsible for keeping this data accurate: after executing operations via the target's MCP server, they report the resulting object references and render hashes back to Opus MCP.
 
 ### Render Behavior
 
 - Canonical branches render to designated tracks and scenes.
 - Alternatives render to separate clips or scenes for rapid A/B comparison.
-- Generated objects carry graph IDs through names, metadata, or an adapter-side mapping store.
-- Rendering is planned before execution and applied idempotently.
+- Generated objects carry graph IDs through names, metadata, or the Composition Core's mapping records.
+- Rendering is planned by Opus MCP before execution; agents apply it via the target's MCP server idempotently.
 - Partial rendering is supported by section, entity, track, or bar range.
-- The adapter reports failed, skipped, and manually protected operations.
+- Agents report failed, skipped, and manually protected operations back to Opus MCP after execution.
 
-### Manual Ableton Changes
+### Manual DAW Changes
 
-When mapped content changes in Ableton, the system records drift and asks for one of four resolutions:
+When mapped content changes in the target DAW, the agent detects drift — via that DAW's MCP server, relative to the last recorded render hash — and reports it to Opus MCP, which asks for one of four resolutions:
 
 1. **Absorb** — infer and write the meaningful change back into the semantic or performance graph.
-2. **Local override** — retain the Ableton edit as target-specific state without changing canonical intent.
+2. **Local override** — retain the DAW edit as target-specific state without changing canonical intent.
 3. **Regenerate** — replace the local edit from the canonical graph.
 4. **Fork** — preserve the edit as the starting point for a new branch.
 
@@ -204,7 +208,7 @@ Automatic absorption should be limited to changes that can be represented with h
 
 ## Read-only UI Concept
 
-The UI should resemble a focused development environment more than a DAW. Its purpose is to answer: What is the composition doing? Why did it change? What is being proposed? What will Ableton render? Where are the conflicts?
+The UI should resemble a focused development environment more than a DAW. Its purpose is to answer: What is the composition doing? Why did it change? What is being proposed? What will the target DAW render? Where are the conflicts?
 
 ### Primary Layout
 
@@ -215,7 +219,7 @@ The UI should resemble a focused development environment more than a DAW. Its pu
 - **Activity panel:** agent reasoning summaries, validation results, render progress, drift, and warnings
 - **Branch and alternative strip:** comparable proposals with concise semantic diffs and audition status
 
-All views are synchronized. Selecting a motif highlights its appearances on the timeline and its mapped clips in Ableton. Selecting a bar range highlights the active sections, motifs, constraints, and recent changes. The UI may offer navigation, filtering, audition triggers, and approve/reject actions, but it should not expose direct note, clip, or graph editing in the MVP.
+All views are synchronized. Selecting a motif highlights its appearances on the timeline and its mapped clips in the target DAW. Selecting a bar range highlights the active sections, motifs, constraints, and recent changes. The UI may offer navigation, filtering, audition triggers, and approve/reject actions, but it should not expose direct note, clip, or graph editing in the MVP.
 
 ### Visual Language
 
@@ -223,7 +227,7 @@ All views are synchronized. Selecting a motif highlights its appearances on the 
 - Intent, performance, and render entities have distinct but restrained visual treatments.
 - Provenance and confidence are visible without dominating the composition.
 - Proposed additions, modifications, and removals use a consistent diff language.
-- Uncertainty, constraint violations, and Ableton drift are never hidden behind a generic “sync” indicator.
+- Uncertainty, constraint violations, and target-DAW drift are never hidden behind a generic “sync” indicator.
 
 ## User Workflows
 
@@ -233,7 +237,7 @@ All views are synchronized. Selecting a motif highlights its appearances on the 
 2. The Conductor scopes the chorus and delegates bounded proposals.
 3. Composer and Arranger agents return alternative semantic diffs.
 4. The Critic evaluates constraint satisfaction and downstream effects.
-5. Valid alternatives render into separate Ableton scenes.
+5. Valid alternatives render into separate scenes in the target DAW.
 6. The user auditions them and accepts, rejects, or merges a result.
 7. Acceptance creates a canonical revision with provenance.
 
@@ -241,12 +245,12 @@ All views are synchronized. Selecting a motif highlights its appearances on the 
 
 1. The user selects a motif or section.
 2. The UI shows where it appears, how it changes, what it supports, and which constraints affect it.
-3. The user can trace the idea from semantic intent through performance choices to rendered Ableton objects.
+3. The user can trace the idea from semantic intent through performance choices to rendered DAW objects.
 
 ### Reconcile a Manual Edit
 
-1. A musician edits a generated clip in Ableton.
-2. The adapter detects drift from the last render hash.
+1. A musician edits a generated clip in the target DAW.
+2. The agent, via that DAW's MCP server, detects drift from the last render hash and reports it to Opus MCP.
 3. The UI highlights the affected semantic entities and summarizes the change.
 4. The user chooses absorb, local override, regenerate, or fork.
 5. The chosen resolution is recorded as a transaction.
@@ -268,33 +272,33 @@ All views are synchronized. Selecting a motif highlights its appearances on the 
 - Expose core MCP resources and proposal, validation, apply, revert, and branch tools.
 - Support one Conductor and two specialist roles: Composer and Critic.
 - Implement deterministic MIDI rendering for a constrained subset of the graph.
-- Build an Ableton adapter for tracks, MIDI clips, scenes, and locators.
+- Define render-plan and mapping resources/tools so agents can drive a target DAW's own MCP server for tracks, MIDI clips, scenes, and locators.
 - Render alternatives into separate scenes.
 - Ship a read-only UI with navigator, graph, inspector, timeline, activity, and proposal diff views.
-- Require explicit approval for canonical mutations and Ableton reconciliation.
+- Require explicit approval for canonical mutations and DAW reconciliation.
 
-**MVP success test:** A user can request a semantic change, receive two valid alternatives, inspect their rationale and graph diffs, audition both in Ableton, accept one, and revert it without losing history.
+**MVP success test:** A user can request a semantic change, receive two valid alternatives, inspect their rationale and graph diffs, audition both in their DAW, accept one, and revert it without losing history.
 
 ### Beta — Round-trip Reliability
 
 - Add performance-layer detail: articulation, dynamics, groove, timing, voicing, and orchestration.
 - Add partial rendering and stronger idempotency guarantees.
-- Detect Ableton drift and support all four resolution modes.
+- Support agent-reported DAW drift detection and all four resolution modes.
 - Add Arranger and Performer agents.
 - Improve branch comparison and semantic merge conflict handling.
 - Add constraint authoring through conversation and reusable constraint presets.
-- Add project import heuristics that infer an initial graph from an existing Ableton set.
+- Add project import heuristics that infer an initial graph from an existing DAW project.
 - Instrument latency, render fidelity, proposal acceptance, conflicts, and reversions.
 
 ### v1 — Collaborative Composition Environment
 
 - Add Sound Designer and Mix Engineer roles.
 - Support multi-agent proposal orchestration with explicit permissions and budgets.
-- Expand target coverage to automation, devices, audio references, and richer Ableton metadata.
+- Expand target coverage to automation, devices, audio references, and richer target-specific metadata.
 - Add durable project packaging, migrations, backup, and recovery.
-- Support real-time selection synchronization between the UI and Ableton.
+- Support real-time selection synchronization between the UI and the target DAW.
 - Add branch merge assistance and user-defined evaluation rubrics.
-- Publish a stable schema and adapter contract for additional render targets.
+- Publish a stable render-plan schema so agents can target additional DAWs, each through its own existing MCP server, following the same pattern used for every other target.
 
 ## Risks
 
@@ -308,11 +312,11 @@ Semantic correctness does not guarantee compelling music. Preserve performer-spe
 
 ### Round-trip Data Loss
 
-Some Ableton edits cannot be cleanly lifted into semantic intent. Never silently absorb ambiguous state. Preserve target overrides and make lossy translations explicit.
+Some DAW edits cannot be cleanly lifted into semantic intent. Never silently absorb ambiguous state. Preserve target overrides and make lossy translations explicit.
 
-### Graph and Ableton Diverge
+### Graph and Target DAW Diverge
 
-Stable IDs, render hashes, base revisions, idempotent operations, drift detection, and visible reconciliation state are foundational—not later polish.
+Stable IDs, render hashes, base revisions, idempotent operations, drift detection, and visible reconciliation state are foundational—not later polish. Because Opus MCP has no direct connection to any target DAW, drift detection depends entirely on agents faithfully reporting state after each operation through that DAW's own MCP server — treat that reporting contract as part of the product surface, not an implementation detail.
 
 ### Agent Conflicts and Scope Creep
 
@@ -342,13 +346,13 @@ Users may reject opaque changes even when they sound good. Every proposal should
 - Educational views that explain composition and arrangement decisions
 - Cross-project motif lineage and versioning
 - Model-independent agent protocols so specialist implementations can be swapped or compared
-- A plugin ecosystem for graph extensions, render planners, evaluators, and target adapters
+- A plugin ecosystem for graph extensions, render planners, and evaluators
 
 ---
 
 ## Product Boundary
 
-Opus MCP owns musical meaning, structured change, and revision history. Ableton owns detailed production and playback. Agents propose changes through a governed semantic interface. The UI makes the system understandable without becoming an editor.
+Opus MCP owns musical meaning, structured change, and revision history. The target DAW owns detailed production and playback, reached through that DAW's own existing MCP server — Opus MCP never builds or hosts a target-specific adapter. Agents propose changes through a governed semantic interface. The UI makes the system understandable without becoming an editor.
 
-That boundary is the defining product decision: build the reasoning layer that DAWs do not provide, then let a mature DAW remain the instrument.
+That boundary is the defining product decision: build the rules, constraints, and structured-state engine that DAWs do not provide, then let a mature DAW remain the instrument.
 
